@@ -1,0 +1,88 @@
+#!/bin/bash
+
+function show_success() {
+  zenity --info --title="Success" --text="<span font='25' foreground='green'>$1</span>" --width=500
+}
+function show_warning() {
+  zenity --warning --title="Warning" --text="<span font='25' foreground='red'>$1</span>" --width=500
+}
+
+function connect() {
+
+  if [ ! -d "database" ]; then
+    show_warning "The database engine is not initialized yet."
+    ./main
+    exit
+  fi
+
+  databases=$(ls ./database | wc -l)
+
+  if ((databases == 0)); then
+    show_warning "The database engine is empty!"
+    ./main
+    exit
+  else
+    databases_list=$(ls -F "database" | grep / | tr / " ")
+    name=$(zenity --list --title="Select Database" --text="Select a database to connect to:" --column="Databases" $databases_list --cancel-label="Back" --width=500 --height=400)
+
+    if [ $? -eq 1 ]; then
+      ./main
+      exit
+    fi
+
+    if [ -z $name ]; then
+      connect
+
+    fi
+    if [ -d "database/$name" ]; then
+      show_success "Successfully connected to $name database."
+
+      operation=$(zenity --list --title="Database Operations" --cancel-label="Back" --text="Choose an operation:" --column="Operation" \
+        "Create Table" "Drop Table" "List Tables" "Select From Table" "Insert Into Table" "Update From Table" "Delete From Table" \
+        --height=400 \
+        --width=500)
+
+      if [ $? -eq 1 ]; then
+        ./connectToDatabase
+        exit
+      fi
+
+      case $operation in
+      "Create Table")
+        ./createTable $name
+        exit
+        ;;
+      "Drop Table")
+        ./drop_tabel $name
+        exit
+        ;;
+      "List Tables")
+        ./list_tabel.sh $name
+        exit
+        ;;
+      "Select From Table")
+        ./selectFromTable $name
+        exit
+        ;;
+      "Insert Into Table")
+        ./InsertTable.sh $name
+        exit
+        ;;
+      "Update From Table")
+        ./updateTable $name
+        exit
+        ;;
+      "Delete From Table")
+        ./deleteFromTable $name
+        exit
+        ;;
+      esac
+    else
+     show_warning "Database $name does not exist."
+      connect
+      return
+    fi
+  fi
+}
+
+connect

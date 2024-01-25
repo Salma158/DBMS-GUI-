@@ -1,0 +1,36 @@
+#!/bin/bash
+
+function show_success() {
+  zenity --info --title="Success" --text="<span font='25' foreground='green'>$1</span>" --width=500
+}
+function show_warning() {
+  zenity --warning --title="Warning" --text="<span font='25' foreground='red'>$1</span>" --width=500
+}
+
+
+tables_folder="database/$1"
+if [ ! -d "$tables_folder" ] || [ -z "$(ls -A "$tables_folder" | grep -v "_meta$")" ]; then
+  show_warning "No tables found in the database '$1'." 
+  ./connectToDatabase
+  exit
+else
+
+  tables=($(ls -F "./database/$1" | grep -v / | grep -v "_meta$"))
+  selectedTable=$(zenity --list --title="Select Table" --text="Select a table from the list:" --column="Tables" "${tables[@]}" --width=500 --height=400)
+
+  if [ $? -eq 1 ]; then
+    ./connectToDatabase
+    exit
+  fi
+
+  rm "database/$1/$selectedTable"
+
+  meta_file="database/$1/${selectedTable}_meta"
+  if [ -f "$meta_file" ]; then
+    rm "$meta_file"
+  fi
+
+  show_success "Table '$selectedTable' (file) and its metadata dropped successfully."
+  ./connectToDatabase
+  exit
+fi

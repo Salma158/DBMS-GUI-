@@ -1,0 +1,189 @@
+#!/bin/bash
+
+source validateDataType
+source validateConstraint
+
+# $1 name of database
+# $2 name of file
+
+function show_success() {
+  zenity --info --title="Success" --text="<span font='25' foreground='green'>$1</span>" --width=500
+}
+function show_warning() {
+  zenity --warning --title="Warning" --text="<span font='25' foreground='red'>$1</span>" --width=500
+}
+
+function validateExistanceOfData() {
+  while true; do
+    tableFields=($(awk -F: '{print $1}' "./database/$1/${2}_meta"))
+
+    options_string=""
+    for opt in "${tableFields[@]}"; do
+      options_string+="FALSE $opt "
+    done
+
+    name=$(zenity --list --title="Enter Column to update" --text="Select the name of the column you want to update:" --radiolist --column="" --column="Options" $options_string --width=500 --height=400)
+
+    if [ $? -eq 1 ]; then
+      ./connectToDatabase
+      exit
+    fi
+
+    if grep -w "$name" "./database/$1/${2}_meta" >/dev/null; then
+
+      colNum=$(awk -F: -v col="$name" '{ if ($1 == col) print NR }' "./database/$1/${2}_meta")
+
+      value=$(zenity --entry --title="Enter Value" --text="Enter the new value :" --width=500)
+
+      if [ $? -eq 1 ]; then
+        ./connectToDatabase
+        exit
+      fi
+
+      if [ -z "$value" ]; then
+        value="_"
+      fi
+
+      while true; do
+        condCol=$(zenity --list --title="Enter Column for Condition" --text="Select the name of the column of the condition:" --radiolist --column="" --column="Options" $options_string --width=500 --height=400)
+
+        if [ $? -eq 1 ]; then
+          ./connectToDatabase
+          exit
+        fi
+
+        if grep -w "$condCol" "./database/$1/${2}_meta" >/dev/null; then
+          condColNum=$(awk -F: -v col="$condCol" '{ if ($1 == col) print NR }' "./database/$1/${2}_meta")
+
+          condval=$(zenity --entry --title="Enter Condition Value" --text="Enter the value of the condition:" --width=500)
+
+          if [ $? -eq 1 ]; then
+            ./connectToDatabase
+            exit
+          fi
+
+          validateValue $colNum "$value" $1 $2
+          DTvalid=$?
+          if [[ DTvalid -eq 1 ]]; then
+            validConstraint $colNum "$value" $1 $2
+            Cvalid=$?
+            if [[ $Cvalid -eq 1 ]]; then
+              updateRecords $colNum "$value" $1 $2 $condColNum "$condval"
+              show_success "table updated successfully :)"
+              ./connectToDatabase
+              exit
+            else
+              show_warning "invalid value : violates the constraints of the column !"
+              ./connectToDatabase
+              exit
+            fi
+          else
+            show_warning "invalid value data type : violates the data type of the column !"
+
+            ./connectToDatabase
+            exit
+          fi
+          break 2
+        else
+          show_warning "Invalid input : the name of the condition column you specified doesn't exist!"
+
+          ./connectToDatabase
+          exit
+        fi
+      done
+    else
+      show_warning "Invalid input : the name of the column you specified doesn't exist !"
+      ./connectToDatabase
+      exit
+    fi
+  done
+}
+
+# $1 colNum to be updated
+# $2 newvalue
+
+function validateValue() {
+
+  colDataType=$(awk -F: -v col="$1" '{ if (NR == col) print $2}' "./database/$3/${4}_meta")
+  # Validate the data type of the value
+  isValidDataType "$2" "$colDataType"
+  dataTypeValid=$?
+  if [[ $dataTypeValid -eq 0 ]]; then
+    #invalid
+    return 0
+  else
+    #valid
+    return 1
+  fi
+}
+
+function validConstraint() {
+  constraints=$(awk -F: -v target="$1" '{if (NR == target) for (i=3; i<=NF; i++) {print $i}}' "./database/$3/${4}_meta")
+
+  constraintValid=1
+  if [[ $constraints != "" ]]; then
+    for i in $constraints; do
+      validateConstraints "$1" "$2" $3 $4 $i
+
+      constraintValid=$?
+    done
+    return $constraintValid
+  else
+    return 1
+  fi
+}
+
+function updateRecords() {
+  NRofRows=$(awk -v fieldnum="$5" -v fieldvalue="$6" -F ":" '{if ($fieldnum == fieldvalue) {print NR}}' "./database/$3/$4")
+
+  if [[ "$NRofRows" != "" ]]; then
+
+    constraints=$(awk -F: -v target="$1" '{if (NR == target) for (i=3; i<=NF; i++) {print $i}}' "./database/$3/${4}_meta")
+
+    for i in $constraints; do
+      if [[ ("$i" == "unique" || "$i" == "pk") && $(echo "$NRofRows" | wc -w) -gt 1 ]]; then
+        show_warning "Invalid Input: The column has a unique or pk constraint, and updating multiple rows is not allowed!"
+
+        ./connectToDatabase
+        exit
+      fi
+    done
+
+    for i in $NRofRows; do
+
+      awk -v lineNumber="$i" -v newValue="$2" -v fieldNumber="$1" -F: '{OFS=":"} {if (NR==lineNumber) $fieldNumber = newValue} 1' "./database/$3/${4}" >"./database/$3/${4}.tmp" && mv "./database/$3/${4}.tmp" "./database/$3/${4}"
+
+     show_success "records updated successfully"
+      ./connectToDatabase
+      exit
+    done
+
+  else
+
+    show_warning "Invalid Input, there is no row matching the condition!"
+    ./connectToDatabase
+    exit
+  fi
+}
+
+directory="./database/$1"
+
+if [ -z "$(ls -A $directory)" ]; then
+ show_warning "The database is empty."
+  ./connectToDatabase
+  exit
+else
+  tables=($(ls -F "./database/$1" | grep -v / | grep -v "_meta$"))
+  selectedTable=$(zenity --list --title="Select Table" --text="Select the table that you want to update from : " --column="Tables" "${tables[@]}" --width=500 --height=400)
+
+  if [ $? -eq 1 ]; then
+    ./connectToDatabase
+    exit
+  fi
+
+  if [ -f "./database/$1/$selectedTable" ]; then
+    validateExistanceOfData "$1" "$selectedTable"
+  else
+   show_warning "There is no table with this name in the database!"
+  fi
+fi

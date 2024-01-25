@@ -1,0 +1,63 @@
+#! /usr/bin/bash
+
+function show_success() {
+  zenity --info --title="Success" --text="<span font='25' foreground='green'>$1</span>" --width=500
+}
+function show_warning() {
+  zenity --warning --title="Warning" --text="<span font='25' foreground='red'>$1</span>" --width=500
+}
+
+
+dropDatabase() {
+
+if [ ! -d "database" ]; then
+
+  zenity --info --text="No databases yet" --width=500
+  ./main
+  exit
+else
+
+  databasesCount=$(ls database | wc -l)
+
+  if ((databasesCount == 0)); then
+    show_warning "The Database engine is already empty."
+    ./main
+    exit
+  else
+    databases=$(ls -F "database" | grep / | tr / " ")
+
+    if [ $? -eq 1 ]; then
+      ./main
+      exit
+    fi
+
+    if [ -z "$databases" ]; then
+      show_warning "No databases yet. database folder is empty."
+      ./main
+      exit
+    fi
+
+    selected_database=$(zenity --list --title="Select Database" --text="Choose a database to drop:" --column="Databases" $databases --width=500 --height=400)
+
+    if [ $? -eq 1 ]; then
+      ./main
+      exit
+    fi
+
+    if [ -z "$selected_database" ]; then
+      show_warning "No database selected."
+      dropDatabase
+      return
+    fi
+
+    if [ -d "database/$selected_database" ]; then
+      rm -r "database/$selected_database"
+      show_success "$selected_database database deleted successfully"
+      ./main
+      exit
+    fi
+  fi
+  fi
+}
+
+dropDatabase

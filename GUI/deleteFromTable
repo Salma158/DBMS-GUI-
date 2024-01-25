@@ -1,0 +1,248 @@
+#!/bin/bash
+
+function show_success() {
+  zenity --info --title="Success" --text="<span font='25' foreground='green'>$1</span>" --width=500
+}
+function show_warning() {
+  zenity --warning --title="Warning" --text="<span font='25' foreground='red'>$1</span>" --width=500
+}
+
+
+function enterColumnsTodelete() {
+  all=0
+  selectedColumns=()
+  # all or not
+  choice=$(zenity --list --title="Select Columns" --text="Do you want to select specific columns to delete from or all ?" --radiolist --column="" --column="Options" FALSE "all" FALSE "specific columns" --width=500 --height=400)
+
+  if [ $? -eq 1 ]; then
+    ./connectToDatabase
+    exit
+  fi
+
+  if [[ $? -eq 0 ]]; then
+    case $choice in
+    "all")
+      all=1
+      ;;
+    "specific columns") ;;
+
+    *)
+      show_warning "Invalid option. Please select again."
+      enterColumnsToSelect
+      return
+      ;;
+    esac
+  else
+    exit 0
+  fi
+
+  if [[ $all -eq 0 ]]; then
+    tableFields=($(awk -F: '{print $1}' "./database/$1/${2}_meta"))
+
+    options_string=""
+    for opt in "${tableFields[@]}"; do
+      options_string+="FALSE $opt "
+    done
+
+    selectedCols=($(zenity --list --title="Select Columns" --text="Select columns to delete :" --checklist --column="" --column="Columns" $options_string --width=500 --height=400))
+
+    if [ $? -eq 1 ]; then
+      ./connectToDatabase
+      exit
+    fi
+
+    IFS='|' read -ra selected_options <<<"${selectedCols[*]}"
+
+    if [[ -z $selectedCols ]]; then
+      show_warning "No columns selected."
+      ./connectToDatabase
+      exit
+    fi
+
+    for column in "${selected_options[@]}"; do
+      colNumbers=$(awk -F: -v name="$column" '{if ( $1 == name ) {print NR}}' "./database/$1/${2}_meta")
+      selectedColumns+=("$colNumbers")
+    done
+  fi
+
+  #to know condition or not
+  cond=0
+
+  Valid=1
+  for i in "${selectedColumns[@]}"; do
+    validConstraintNull $i $1 $2
+    valid=$?
+    echo $valid
+    if [[ $valid -eq 0 ]]; then
+      show_warning "columns with constraint not Null or pk , cannot delete these fields"
+      ./connectToDatabase
+      exit
+    fi
+  done
+
+  choice=$(zenity --list --title="Delete Rows Based on Condition" --text="Do you have a specific condition you want to delete rows based on?" --radiolist --column="" --column="Options" FALSE "yes" FALSE "no" --width=500 --height=400)
+
+  if [ $? -eq 1 ]; then
+    ./connectToDatabase
+    exit
+  fi
+
+  if [[ $? -eq 0 ]]; then
+    case $choice in
+    "yes")
+      cond=1
+      ;;
+    "no") ;;
+
+    *)
+      show_warning "Invalid option. Please select again."
+      enterColumnsToSelect
+      return
+      ;;
+    esac
+  else
+    exit 0
+  fi
+
+  if [[ $cond -eq 1 ]]; then
+    tableFields=($(awk -F: '{print $1}' "./database/$1/${2}_meta"))
+
+    options_string=""
+    for opt in "${tableFields[@]}"; do
+      options_string+="FALSE $opt "
+    done
+
+    condCol=$(zenity --list --title="Enter Column for Condition" --text="Select the name of the column you want the condition based on:" --radiolist --column="" --column="Options" $options_string --width=500 --height=400)
+
+    if [ $? -eq 1 ]; then
+      ./connectToDatabase
+      exit
+    fi
+
+    if grep -w "$condCol" "./database/$1/${2}_meta" >/dev/null; then
+      condColNum=$(awk -F: -v col="$condCol" '{ if ($1 == col) print NR }' "./database/$1/${2}_meta")
+
+      condval=$(zenity --entry --title="Enter Condition Value" --text="Enter the value of the condition:" --width=500)
+
+      if [ $? -eq 1 ]; then
+        ./connectToDatabase
+        exit
+      fi
+
+      # find rows with this value
+      NRofRows=$(awk -v fieldnum="$condColNum" -v fieldvalue="$condval" -F ":" '{if ($fieldnum == fieldvalue) {print NR}}' "./database/$1/$2")
+
+      if [[ "$NRofRows" != "" ]]; then
+
+        #
+        if [[ $all -eq 1 ]]; then
+          IFS=' ' read -r -a rows_array <<< "$NRofRows"
+    
+
+    temp_file="./database/$1/${2}.temp"
+    
+
+    awk -v rows="${NRofRows}" -v temp_file="$temp_file" '
+        BEGIN {
+            split(rows, rows_array, " ")
+            for (i in rows_array) {
+                delete_rows[rows_array[i]] = 1
+            }
+        }
+        { 
+            if (!(FNR in delete_rows)) {
+                print $0
+            }
+        }
+    ' "./database/$1/${2}" > "$temp_file"
+
+
+    mv "$temp_file" "./database/$1/${2}"
+          show_success "rows based on this condition are deleted successfully"
+          ./connectToDatabase
+          exit
+        else
+
+          if [[ $valid -eq 1 ]]; then
+
+            for i in $NRofRows; do
+              for j in "${selectedColumns[@]}"; do
+                awk -v lineNumber="$i" -v newValue="_" -v fieldNumber="$j" -F: '{OFS=":"} {if (NR==lineNumber) $fieldNumber = newValue} 1' "./database/$1/${2}" >"./database/$1/${2}.tmp" && mv "./database/$1/${2}.tmp" "./database/$1/${2}"
+              done
+
+            done
+            show_success "specific fields based on the condition are deleted successfully"
+            ./connectToDatabase
+            exit
+
+          fi
+        fi
+
+      else
+
+        show_warning "There is no row matching the condition!"
+        ./connectToDatabase
+        exit
+      fi
+    else
+      show_warning "Invalid column name for the condition!"
+      ./connectToDatabase
+      exit
+    fi
+
+  else
+
+    if [[ $all -eq 1 ]]; then
+      # All columns are deleted, and no condition is specified
+      sed -i 'd' "./database/$1/$2"
+      show_success "All data inside the table are deleted successfully"
+      ./connectToDatabase
+      exit
+
+    else
+      for colNum in "${selectedColumns[@]}"; do
+
+        awk -v fieldNumber="$colNum" -v newValue="_" -F: '{OFS=":"} { $fieldNumber = newValue } 1' "./database/$1/${2}" >"./database/$1/${2}.tmp" && mv "./database/$1/${2}.tmp" "./database/$1/${2}"
+      done
+      show_success "data inside these columns are deleted successfully."
+      ./connectToDatabase
+      exit
+    fi
+  fi
+
+}
+
+function validConstraintNull() {
+  constraints=$(awk -F: -v target="$1" '{if (NR == target) for (i=3; i<=NF; i++) {print $i}}' "./database/$2/${3}_meta")
+
+  if [[ $constraints != "" ]]; then
+    for i in $constraints; do
+
+      if [ $i == "notNull" ] || [ $i == "pk" ]; then
+        return 0
+      else
+        return 1
+      fi
+
+    done
+  else
+    return 1
+  fi
+}
+
+directory="./database/$1"
+
+if [ -z "$(ls -A $directory)" ]; then
+  show_warning "The database is empty."
+  ./connectToDatabase
+  exit
+else
+  tables=($(ls -F "./database/$1" | grep -v / | grep -v "_meta$"))
+  selectedTable=$(zenity --list --title="Select Table" --text="Select a table from the list:" --column="Tables" "${tables[@]}" --width=500 --height=400)
+
+  if [ -f "./database/$1/$selectedTable" ]; then
+    enterColumnsTodelete "$1" "$selectedTable"
+  else
+    show_warning "There is no table with this name in the database!"
+  fi
+fi

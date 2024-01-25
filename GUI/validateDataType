@@ -1,0 +1,18 @@
+#! /usr/bin/bash
+
+#the value entered by the user  $1
+#data type of the column $2
+
+function isValidDataType() {
+  if [[ "$2" == integer ]]; then
+    if [[ "$1" =~ ^[0-9]+$ || "$1" == "_" ]]; then
+      return 1
+
+    else
+      return 0
+
+    fi
+  elif [[ "$2" == varchar ]]; then
+      return 1
+  fi
+}

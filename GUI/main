@@ -1,0 +1,45 @@
+#!/bin/bash
+
+function show_success() {
+  zenity --info --title="Success" --text="<span font='25' foreground='green'>$1</span>" --width=500
+}
+function show_warning() {
+  zenity --warning --title="Warning" --text="<span font='25' foreground='red'>$1</span>" --width=500
+}
+
+
+
+function main(){
+option=$(zenity --list --title="Database Management System" --text="Please choose one of these options" --column="Options" "Create Database" "Drop Database" "List Database" "Connect to Database" --width=500 --height=400 --cancel-label="Exit")
+
+if [ $? -eq 1 ]; then
+  exit 1
+fi
+
+case $option in
+"Create Database")
+  ./create_db.sh
+  exit
+  ;;
+"Drop Database")
+  ./dropDatabase
+  exit
+  ;;
+"List Database")
+  ./list_db.sh
+  exit
+  ;;
+"Connect to Database")
+  ./connectToDatabase
+  exit
+  ;;
+*)
+   show_warning "Error: You didn't select option. Please select one of these options."
+  main
+  return
+  ;;
+esac
+}
+
+
+main

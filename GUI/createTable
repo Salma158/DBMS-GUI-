@@ -1,0 +1,244 @@
+#!/bin/bash
+
+function cleanup() {
+  if [ -n "$2" ]; then
+    rm -f "./database/$1/$2"
+    rm -f "./database/$1/${2}_meta"
+  fi
+}
+function show_success() {
+  zenity --info --title="Success" --text="<span font='25' foreground='green'>$1</span>" --width=500
+}
+function show_warning() {
+  zenity --warning --title="Warning" --text="<span font='25' foreground='red'>$1</span>" --width=500
+}
+
+function createTable() {
+
+  name=$(zenity --entry --title="Create Table" --text="Enter the name of the table you want to create:" --width=500)
+
+  if [ $? -eq 1 ]; then 
+    cleanup $1 name
+    ./connectToDatabase
+   exit
+  fi
+  
+  if [[ "$name" == *" "* ]]; then
+     name=$(echo "${name}" | tr ' ' '_')
+     show_success "Spaces in the name have been replaced with underscores."
+  fi
+  
+  
+  if [ -f "./database/$1/$name" ]; then
+    show_warning "You already have a table with this name in this Database!"
+    createTable $1
+    return
+  elif [ -z "$name" ]; then
+    show_warning "Invalid input: empty string."
+    createTable $1
+    return
+  elif [[ "$name" == [1-9]* ]]; then
+    show_warning "Invalid input: Table name shouldn't start with a number."
+    createTable $1
+    return
+  
+  elif [[ $name == *[!a-zA-Z0-9_]* ]]; then
+    show_warning "Error: The name should not contain special characters."
+    createTable $1
+    return
+  fi
+  
+    touch ./database/$1/"${name}"
+    touch ./database/$1/"${name}_meta"
+    enterColsNum $1 $name
+    exit
+}
+
+function enterColsNum() {
+  num=$(zenity --entry --title="Enter Number of Columns" --text="Enter the number of columns for the table:" --width=500)
+
+  if [ $? -eq 1 ]; then 
+  cleanup $1 $2
+  ./connectToDatabase
+    exit
+  fi
+
+  if [ -z "$num" ]; then
+    show_warning "Invalid input: empty value." 
+    enterColsNum $1 $2
+    return
+  elif ! [[ $num =~ ^[0-9]+$ ]]; then
+    show_warning "Invalid input: expected numbers only."
+    enterColsNum $1 $2
+    return
+  elif [[ $num -lt 1 ]]; then
+    show_warning "Invalid input: expected number greater than two."
+    enterColsNum $1 $2
+    return
+  elif [[ $num -gt 1000 ]]; then
+    show_warning "Invalid input: expected number less than 1000."
+    enterColsNum $1 $2
+    return
+  else
+    counter=1
+    while [ "$counter" -le "$num" ]; do
+      if [ "$counter" -eq 1 ]; then
+        validatePk "$1" "$2"
+        echo -e -n "\n" >>./database/$1/"${2}_meta"
+      else
+        validateCol "$1" "$2"
+        echo -e -n "\n" >>./database/$1/"${2}_meta"
+      fi
+      ((counter++))
+    done
+     show_success "Table created successfully!"
+    ./connectToDatabase
+    exit
+  fi
+}
+
+function validatePk() {
+  pk=1
+  name=$(zenity --entry --title="Primary Key" --text="Enter the name of the primary key:" --width=500)
+
+  if [ $? -eq 1 ]; then
+     cleanup $1 $2
+    ./connectToDatabase
+    exit
+  fi
+
+  if grep -w "$name" ./database/$1/"${2}_meta"; then
+    show_warning "You already have a column with this name in this Database!"
+    validatePk $1 $2
+    return
+  elif [ -z "${name}" ]; then
+    show_warning "Invalid input: empty string."
+    validatePk $1 $2
+    return
+  elif [[ "${name}" == *" "* ]]; then
+    show_warning "Invalid input: Column name shouldn't contain spaces."
+    validatePk $1 $2
+    return
+  elif [[ "${name}" == [1-9]* ]]; then
+    show_warning "Invalid input: Column name shouldn't start with a number."
+    validatePk $1 $2
+    return
+  elif ! [[ "${name}" == [a-zA-Z]* ]]; then
+    show_warning "Invalid input: Column name shouldn't start with a special character."
+    validatePk $1 $2
+    return
+  else
+    if [[ "${name}" == *" "* ]]; then
+      name=$(echo "${name}" | tr ' ' '_')
+    fi
+    echo -n $name >>./database/$1/"${2}_meta"
+    enterColDataType $name $1 "${2}_meta" $pk $2
+    echo -n ":pk" >>./database/$1/"${2}_meta"
+  fi
+}
+
+function validateCol() {
+  pk=0
+  name=$(zenity --entry --title="Enter Column Name" --text="Enter the name of the next column:" --width=500)
+
+  if [ $? -eq 1 ]; then
+     cleanup $1 $2
+    ./connectToDatabase
+    exit
+  fi
+  if grep -w "$name" ./database/$1/"${2}_meta"; then
+   show_warning "You already have a column with this name in this Database!"
+    validateCol $1 $2
+    return
+  elif [ -z "${name}" ]; then
+    show_warning "Invalid input: empty string."
+    validateCol $1 $2
+    return
+  elif [[ "${name}" == *" "* ]]; then
+    show_warning "Invalid input: Column name shouldn't contain spaces."
+    validateCol $1 $2
+    return
+  elif [[ "${name}" == [1-9]* ]]; then
+    show_warning "Invalid input: Column name shouldn't start with a number." 
+    validateCol $1 $2
+    return
+  elif ! [[ "${name}" == [a-zA-Z]* ]]; then
+    show_warning "Invalid input: Column name shouldn't start with a special character."
+    validateCol $1 $2
+    return
+  else
+    if [[ "${name}" == *" "* ]]; then
+      name=$(echo "${name}" | tr ' ' '_')
+    fi
+    echo -n $name >>./database/$1/"${2}_meta"
+    enterColDataType $name $1 "${2}_meta" $pk $2
+  fi
+}
+
+function enterColDataType() {
+  option=$(zenity --list --title="Select Data Type" --text="Specify the data type of the column ${1}:" --column="Options" varchar integer --width=500 --height=400)
+	
+  if [ $? -eq 1 ]; then
+     cleanup $2 $5
+    ./connectToDatabase
+    exit
+  fi
+
+  case $option in
+  "varchar")
+    echo -n ":varchar" >>./database/$2/$3
+    enterColConstraints $1 $2 $3 $4 $5
+    ;;
+  "integer")
+    echo -n ":integer" >>./database/$2/$3
+    enterColConstraints $1 $2 $3 $4 $5
+    ;;
+  *)
+  show_warning "Invalid input: you didn't specify the data type of the column."	
+    enterColDataType $1 $2 $3 $4 $5
+    return
+    ;;
+  esac
+}
+
+
+function enterColConstraints() {
+
+  if [[ $4 -eq 0 ]]; then
+    options=("notNull" "unique")
+
+    options_string=""
+    for opt in "${options[@]}"; do
+      options_string+="FALSE $opt "
+    done
+
+    choices=($(zenity --list --title="Select Constraint" --text="Choose a constraint for $1:" --checklist --column="Select" --column="Options" $options_string --width=500 --height=400))
+
+	if [ $? -eq 1 ]; then
+        cleanup $2 $5
+        ./connectToDatabase
+        exit
+  	fi
+	
+	
+    IFS='|' read -ra selected_options <<<"$choices"
+    
+    if [ -n "$choices" ]; then
+      for opt in "${selected_options[@]}"; do
+        case "$opt" in
+          "notNull")
+            echo -n ":notNull" >> "./database/$2/$3"
+            ;;
+          "unique")
+            echo -n ":unique" >> "./database/$2/$3"
+            ;;
+        esac
+      done
+    else
+      return
+    fi
+
+  fi
+}
+
+createTable $1

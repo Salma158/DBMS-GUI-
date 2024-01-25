@@ -1,0 +1,295 @@
+#!/bin/bash
+
+
+function show_success() {
+  zenity --info --title="Success" --text="<span font='25' foreground='green'>$1</span>" --width=500
+}
+function show_warning() {
+  zenity --warning --title="Warning" --text="<span font='25' foreground='red'>$1</span>" --width=500
+}
+
+
+function enterColumnsToSelect() {
+  all=0
+  selectedColumns=()
+
+  choice=$(zenity --list --title="Select Columns" --text="Do you want to select specific columns or all?" --radiolist --column="" --column="Options" FALSE "all" FALSE "specific columns" --width=500 --height=400)
+
+  if [ $? -eq 1 ]; then
+    ./connectToDatabase
+    exit
+  fi
+
+  if [[ $? -eq 0 ]]; then
+    case $choice in
+      "all")
+        all=1
+        ;;
+      "specific columns") ;;
+
+      *)
+        show_warning "Invalid option. Please select again." 
+        enterColumnsToSelect
+        return
+        ;;
+    esac
+  else
+    exit 0
+  fi
+
+  if [[ $all -eq 0 ]]; then
+    tableFields=($(awk -F: '{print $1}' "./database/$1/${2}_meta"))
+
+    options_string=""
+    for opt in "${tableFields[@]}"; do
+      options_string+="FALSE $opt "
+    done
+
+    selectedCols=($(zenity --list --title="Select Columns" --text="Select columns to be displayed :" --checklist --column="" --column="Columns" $options_string --width=500 --height=400))
+
+    if [ $? -eq 1 ]; then
+      ./connectToDatabase
+      exit
+    fi
+
+    IFS='|' read -ra selected_options <<<"${selectedCols[*]}"
+
+    if [[ -z $selectedCols ]]; then
+      show_warning "No columns selected! "
+      ./connectToDatabase
+      exit
+    fi
+
+    for column in "${selected_options[@]}"; do
+      colNumbers=$(awk -F: -v name="$column" '{if ( $1 == name ) {print NR}}' "./database/$1/${2}_meta")
+      selectedColumns+=("$colNumbers")
+    done
+  fi
+
+  cond=0
+
+  choice=$(zenity --list --title="Select Rows Based on Condition" --text="Do you have a specific condition you want to select rows based on?" --radiolist --column="" --column="Options" FALSE "yes" FALSE "no" --width=500 --height=400)
+
+  if [ $? -eq 1 ]; then
+    ./connectToDatabase
+    exit
+  fi
+
+  if [[ $? -eq 0 ]]; then
+    case $choice in
+      "yes")
+        cond=1
+        ;;
+      "no") ;;
+
+      *)
+         show_warning "Invalid option!"
+        ./connectToDatabase
+        exit
+        ;;
+    esac
+  fi
+
+  if [[ $cond -eq 1 ]]; then
+
+    tableFields=($(awk -F: '{print $1}' "./database/$1/${2}_meta"))
+
+    options_string=""
+    for opt in "${tableFields[@]}"; do
+      options_string+="FALSE $opt "
+    done
+
+    condCol=$(zenity --list --title="Enter Column for Condition" --text="Select the name of the column you want the condition based on:" --radiolist --column="" --column="Options" $options_string --width=500 --height=400)
+
+    if [ $? -eq 1 ]; then
+      ./connectToDatabase
+      exit
+    fi
+
+    if grep -w "$condCol" "./database/$1/${2}_meta" >/dev/null; then
+      condColNum=$(awk -F: -v col="$condCol" '{ if ($1 == col) print NR }' "./database/$1/${2}_meta")
+
+      condval=$(zenity --entry --title="Enter Condition Value" --text="Enter the value of the condition:" --width=500)
+
+      if [ $? -eq 1 ]; then
+        ./connectToDatabase
+        exit
+      fi
+
+      NRofRows=$(awk -v fieldnum="$condColNum" -v fieldvalue="$condval" -F ":" '{if ($fieldnum == fieldvalue) {print NR}}' "./database/$1/$2")
+
+      if [[ "$NRofRows" != "" ]]; then
+
+        if [[ $all -eq 1 ]]; then
+          tableFields=$(awk -F: '{print $1}' "./database/$1/${2}_meta")
+
+          zenityCmd="zenity --list --title='Query Result'"
+
+          for field in $tableFields; do
+            zenityCmd+=" --column='$field'"
+          done
+
+          zenityCmd+=" --text='$result'"
+
+          result=""
+          for i in $NRofRows; do
+            result+="\n$(awk -F: -v row="$i" '{if (NR == row) {print $0}}' "./database/$1/${2}")"
+          done
+          echo -e "$result" >/tmp/result.txt
+
+          while IFS=: read -r -a values; do
+            for value in "${values[@]}"; do
+              zenityCmd+=" '$value'"
+            done
+          done <"/tmp/result.txt"
+
+          eval "$zenityCmd" --width=500 --height=400
+
+          ./connectToDatabase
+          exit
+
+        else
+
+          selectedColNames=()
+          for i in "${selectedColumns[@]}"; do
+            value=$(awk -F: -v row="$i" '{if (NR == row) {print $1}}' "./database/$1/${2}_meta")
+            selectedColNames+=("$value")
+          done
+
+          zenityCmd="zenity --list --title='Query Result'"
+
+          for field in "${selectedColNames[@]}"; do
+            zenityCmd+=" --column='$field'"
+          done
+
+          zenityCmd+=" --text='$result'"
+
+          result=""
+
+          for i in $NRofRows; do
+            rowValues=()
+            for j in "${selectedColumns[@]}"; do
+              value=$(awk -F: -v row="$i" -v col="$j" '{if (NR == row) {print $col}}' "./database/$1/${2}")
+              rowValues+=("$value")
+            done
+            result+=$(
+              IFS=:
+              echo "${rowValues[*]}"
+            )
+            result+="\n"
+          done
+
+          echo -e "$result" >/tmp/result.txt
+
+          while IFS=: read -r -a values; do
+            for value in "${values[@]}"; do
+              zenityCmd+=" '$value'"
+            done
+          done <"/tmp/result.txt"
+
+          eval "$zenityCmd" --width=500 --height=400
+          ./connectToDatabase
+          exit
+
+        fi
+
+      else
+
+        show_warning "There is no row matching the condition!"
+        ./connectToDatabase
+        exit
+      fi
+    else
+      show_warning "Invalid column name for the condition!"
+      ./connectToDatabase
+      exit
+    fi
+  else
+    if [[ $all -eq 1 ]]; then
+
+      tableFields=$(awk -F: '{print $1}' "./database/$1/${2}_meta")
+
+      zenityCmd="zenity --list --title='Query Result'"
+
+      for field in $tableFields; do
+        zenityCmd+=" --column='$field'"
+      done
+
+      zenityCmd+=" --text='$result'"
+
+      while IFS=: read -r -a values; do
+        for value in "${values[@]}"; do
+          zenityCmd+=" '$value'"
+        done
+      done <"./database/$1/$2"
+      eval "$zenityCmd" --width=500 --height=400
+
+      ./connectToDatabase
+      exit
+
+    else
+      selectedColNames=()
+      for i in "${selectedColumns[@]}"; do
+        value=$(awk -F: -v row="$i" '{if (NR == row) {print $1}}' "./database/$1/${2}_meta")
+        selectedColNames+=("$value")
+      done
+
+      zenityCmd="zenity --list --title='Query Result'"
+
+      for field in "${selectedColNames[@]}"; do
+        zenityCmd+=" --column='$field'"
+      done
+
+      zenityCmd+=" --text='$result'"
+      result=""
+      NRofRows=$(awk -F: '{print NR}' "./database/$1/$2")
+
+      for i in $NRofRows; do
+        rowValues=()
+        for j in "${selectedColumns[@]}"; do
+          value=$(awk -F: -v row="$i" -v col="$j" '{if (NR == row) {print $col}}' "./database/$1/${2}")
+          rowValues+=("$value")
+        done
+        result+=$(
+          IFS=:
+          echo "${rowValues[*]}"
+        )
+        result+="\n"
+      done
+
+      echo -e "$result" >/tmp/result.txt
+
+      while IFS=: read -r -a values; do
+        for value in "${values[@]}"; do
+          zenityCmd+=" '$value'"
+        done
+      done <"/tmp/result.txt"
+
+      eval "$zenityCmd" --width=500 --height=400
+      ./connectToDatabase
+      exit
+    fi
+  fi
+}
+
+directory="./database/$1"
+
+if [ -z "$(ls -A $directory)" ]; then
+  show_warning "The database is empty."
+  ./connectToDatabase
+else
+  tables=($(ls -F "./database/$1" | grep -v / | grep -v "_meta$"))
+  selectedTable=$(zenity --list --title="Select Table" --text="Select a table from the list:" --column="Tables" "${tables[@]}" --width=500 --height=400)
+
+  if [ $? -eq 1 ]; then
+    ./connectToDatabase
+    exit
+  fi
+
+  if [ -f "./database/$1/$selectedTable" ]; then
+    enterColumnsToSelect "$1" "$selectedTable"
+  else
+    show_warning "There is no table with this name in the database!"
+    exit
+  fi
+fi
