@@ -1,6 +1,0 @@
-id:integer:pk
-name:varchar:notNull:unique
-Stock:integer
-price:integer:notNull
-status:varchar:notNull
-
